@@ -1,0 +1,32 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rcheck/
+*.tar.gz
+.Renviron
+
+# Knit output
+Meta_analysis_code.html
+Meta_analysis_code.pdf
+
+# Generated analysis outputs (re-creatable by running the code)
+results_primary_summary.csv
+results_subgroup_summary.csv
+results_metaregression.csv
+results_conditional_pi.csv
+results_conditional_pi_contemporary.csv
+results_joint_conditional_pi.csv
+results_mcid.csv
+results_mcid_contemporary.csv
+results_within_trial_sd.csv
+forest_*.pdf
+bubble_*.pdf
+loo_*.pdf
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*~
+*.swp
