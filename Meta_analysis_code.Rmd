@@ -1,6 +1,5 @@
 ---
-title: "Placebo-arm responses in generalized myasthenia gravis immunotherapy trials"
-subtitle: "Systematic review and meta-analysis — analysis code"
+title: "Meta-Analysis of Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials"
 author: "Felipe J. S. Jones"
 output:
   html_document:
@@ -134,7 +133,7 @@ m_qmg   <- run_primary(d_qmg,   "qmg_change",   "qmg_vi",   "QMG")
 m_mgc   <- run_primary(d_mgc,   "mgc_change",   "mgc_vi",   "MGC")
 ```
 
-# Forest plots for the primary analyses
+# Forest plots
 
 ```{r}
 plot_primary_forest <- function(model, data, label, filename, width = 10, height = NULL) {
@@ -270,13 +269,16 @@ plot_loo(loo_mgc,   d_mgc,   "MGC",    m_mgc,   "loo_mgc.pdf",   9, 8)
 # Meta-regression: study-level predictors
 
 Pre-specified moderators (univariable):  
-1. Mean age, 2. Female %, 3. Outcome-specific baseline severity,  
-4. MGFA % class III-V, 5. AChR-seropositive %,  
-6. Route (ref = IV), 7. Phase (ref = 2),  
-8. Assessment timepoint (weeks),  
-9. Trial era (2017+ vs pre-2017),  
-10. Steroid change (Taper vs Stable),  
-11. Placebo-arm rescue therapy rate (%).
+1. Mean age, 
+2. Female %, 
+3. MGFA % class III-V, 
+4. AChR-seropositive %,  
+5. Route (ref = IV), 
+6. Phase (ref = 2),  
+7. Assessment timepoint (weeks),  
+8. Trial era (2017+ vs pre-2017),  
+9. Steroid change (Taper vs Stable),  
+10. Placebo-arm rescue therapy rate (%).
 
 ```{r}
 # MG-ADL
@@ -284,8 +286,6 @@ mr_mgadl_age    <- run_metareg(filter(d_mgadl, !is.na(age_mean)),
                                "mgadl_change","mgadl_vi", ~age_mean,         "MG-ADL","Mean age")
 mr_mgadl_sex    <- run_metareg(filter(d_mgadl, !is.na(female_pct)),
                                "mgadl_change","mgadl_vi", ~female_pct,       "MG-ADL","Female%")
-mr_mgadl_base   <- run_metareg(filter(d_mgadl, !is.na(baseline_mgadl)),
-                               "mgadl_change","mgadl_vi", ~baseline_mgadl,   "MG-ADL","Baseline MG-ADL")
 mr_mgadl_mgfa   <- run_metareg(filter(d_mgadl, !is.na(mgfa_severe_pct)),
                                "mgadl_change","mgadl_vi", ~mgfa_severe_pct,  "MG-ADL","MGFA %III-V")
 mr_mgadl_achr   <- run_metareg(filter(d_mgadl, !is.na(achr_pct)),
@@ -308,8 +308,6 @@ mr_qmg_age    <- run_metareg(filter(d_qmg, !is.na(age_mean)),
                              "qmg_change","qmg_vi", ~age_mean,         "QMG","Mean age")
 mr_qmg_sex    <- run_metareg(filter(d_qmg, !is.na(female_pct)),
                              "qmg_change","qmg_vi", ~female_pct,       "QMG","Female%")
-mr_qmg_base   <- run_metareg(filter(d_qmg, !is.na(baseline_qmg)),
-                             "qmg_change","qmg_vi", ~baseline_qmg,     "QMG","Baseline QMG")
 mr_qmg_mgfa   <- run_metareg(filter(d_qmg, !is.na(mgfa_severe_pct)),
                              "qmg_change","qmg_vi", ~mgfa_severe_pct,  "QMG","MGFA %III-V")
 mr_qmg_achr   <- run_metareg(filter(d_qmg, !is.na(achr_pct)),
@@ -332,8 +330,6 @@ mr_mgc_age    <- run_metareg(filter(d_mgc, !is.na(age_mean)),
                              "mgc_change","mgc_vi", ~age_mean,         "MGC","Mean age")
 mr_mgc_sex    <- run_metareg(filter(d_mgc, !is.na(female_pct)),
                              "mgc_change","mgc_vi", ~female_pct,       "MGC","Female%")
-mr_mgc_base   <- run_metareg(filter(d_mgc, !is.na(baseline_mgc)),
-                             "mgc_change","mgc_vi", ~baseline_mgc,     "MGC","Baseline MGC")
 mr_mgc_mgfa   <- run_metareg(filter(d_mgc, !is.na(mgfa_severe_pct)),
                              "mgc_change","mgc_vi", ~mgfa_severe_pct,  "MGC","MGFA %III-V")
 mr_mgc_achr   <- run_metareg(filter(d_mgc, !is.na(achr_pct)),
@@ -352,203 +348,10 @@ mr_mgc_rescue <- run_metareg(filter(d_mgc, !is.na(rescue_rate_num)),
                              "mgc_change","mgc_vi", ~rescue_rate_num,  "MGC","Rescue rate (%)")
 ```
 
-## Bubble plots: timepoint and baseline severity
-
-```{r}
-plot_bubble <- function(data, mr_model, x_col, y_col, vi_col, label_col,
-                        x_lab, y_lab, title, filename, mcid_val = NULL) {
-  d <- data[!is.na(data[[x_col]]) & !is.na(data[[y_col]]), ]
-  d$weight  <- 1 / d[[vi_col]]
-  d$bsize   <- scales::rescale(d$weight, to = c(2, 10))
-  d$era_col <- ifelse(d$year >= 2017, "2017+ trials", "Pre-2017 trials")
-
-  x_seq  <- seq(min(d[[x_col]]) - 0.5, max(d[[x_col]]) + 0.5, length.out = 200)
-  preds  <- predict(mr_model, newmods = x_seq)
-  reg_df <- data.frame(x = x_seq, fit = preds$pred,
-                       lwr = preds$ci.lb, upr = preds$ci.ub)
-
-  r2    <- round(mr_model$R2, 1)
-  beta  <- round(coef(mr_model)[2], 3)
-  pval  <- round(mr_model$pval[2], 3)
-  pval_str <- ifelse(pval < 0.001, "p < 0.001", sprintf("p = %.3f", pval))
-  annot <- paste0("\u03b2 = ", beta, "  ", pval_str, "  R\u00b2 = ", r2, "%")
-
-  p <- ggplot(d, aes_string(x = x_col, y = y_col)) +
-    geom_ribbon(data = reg_df, aes(x = x, ymin = lwr, ymax = upr), inherit.aes = FALSE,
-                fill = "#0057B8", alpha = 0.12) +
-    geom_line(data = reg_df, aes(x = x, y = fit), inherit.aes = FALSE,
-              colour = "#0057B8", linewidth = 0.9) +
-    geom_hline(yintercept = 0, colour = "#999999", linewidth = 0.4, linetype = "dotted") +
-    geom_point(aes(size = bsize, fill = era_col, colour = era_col),
-               shape = 21, alpha = 0.80, stroke = 0.5) +
-    geom_text_repel(aes_string(label = label_col),
-                    size = 2.6, colour = "#333333",
-                    max.overlaps = 20, seed = 42,
-                    box.padding = 0.35, point.padding = 0.2,
-                    min.segment.length = 0.3) +
-    annotate("label", x = Inf, y = Inf, label = annot,
-             hjust = 1.05, vjust = 1.4, size = 3.2,
-             fill = "white", label.size = 0.3, colour = "#0057B8") +
-    scale_size_identity() +
-    scale_fill_manual(values   = c("2017+ trials" = "#0057B8", "Pre-2017 trials" = "#009CDE")) +
-    scale_colour_manual(values = c("2017+ trials" = "#0057B8", "Pre-2017 trials" = "#009CDE")) +
-    labs(title = title, x = x_lab, y = y_lab,
-         fill = NULL, colour = NULL, size = NULL) +
-    theme_bw(base_size = 11) +
-    theme(plot.title       = element_text(face = "bold", colour = "#0057B8", size = 13),
-          legend.position  = "bottom",
-          panel.grid.minor = element_blank()) +
-    guides(size = "none")
-
-  if (!is.null(mcid_val)) {
-    p <- p +
-      geom_hline(yintercept = -mcid_val, linetype = "dashed", colour = "#555555", linewidth = 0.5) +
-      annotate("text",
-               x = min(d[[x_col]]) - 0.2, y = -mcid_val - 0.25,
-               label = paste0("MCID = \u2212", mcid_val),
-               colour = "#555555", size = 3, hjust = 0)
-  }
-
-  ggsave(filename, plot = p, width = 7, height = 5.5, dpi = 300)
-  invisible(p)
-}
-
-# Timepoint
-plot_bubble(filter(d_mgadl, !is.na(tp_mgadl_wk)), mr_mgadl_tp,
-            "tp_mgadl_wk", "mgadl_change", "mgadl_vi", "study_id",
-            "Timepoint (weeks)", "Placebo-arm mean change from baseline (MG-ADL)",
-            "MG-ADL placebo-arm change vs. timepoint", "bubble_mgadl_timepoint_mr.pdf")
-plot_bubble(filter(d_qmg, !is.na(tp_qmg_wk)), mr_qmg_tp,
-            "tp_qmg_wk", "qmg_change", "qmg_vi", "study_id",
-            "Timepoint (weeks)", "Placebo-arm mean change from baseline (QMG)",
-            "QMG placebo-arm change vs. timepoint", "bubble_qmg_timepoint_mr.pdf")
-plot_bubble(filter(d_mgc, !is.na(tp_mgc_wk)), mr_mgc_tp,
-            "tp_mgc_wk", "mgc_change", "mgc_vi", "study_id",
-            "Timepoint (weeks)", "Placebo-arm mean change from baseline (MGC)",
-            "MGC placebo-arm change vs. timepoint", "bubble_mgc_timepoint_mr.pdf")
-
-# Baseline severity
-plot_bubble(filter(d_mgadl, !is.na(baseline_mgadl)), mr_mgadl_base,
-            "baseline_mgadl", "mgadl_change", "mgadl_vi", "study_id",
-            "Study-level mean baseline MG-ADL score",
-            "Placebo-arm mean change from baseline (MG-ADL)",
-            "MG-ADL placebo-arm change vs. study-level baseline severity",
-            "bubble_mgadl_baseline_mr.pdf", mcid_val = 2)
-plot_bubble(filter(d_qmg, !is.na(baseline_qmg)), mr_qmg_base,
-            "baseline_qmg", "qmg_change", "qmg_vi", "study_id",
-            "Study-level mean baseline QMG score",
-            "Placebo-arm mean change from baseline (QMG)",
-            "QMG placebo-arm change vs. study-level baseline severity",
-            "bubble_qmg_baseline_mr.pdf", mcid_val = 3)
-plot_bubble(filter(d_mgc, !is.na(baseline_mgc)), mr_mgc_base,
-            "baseline_mgc", "mgc_change", "mgc_vi", "study_id",
-            "Study-level mean baseline MGC score",
-            "Placebo-arm mean change from baseline (MGC)",
-            "MGC placebo-arm change vs. study-level baseline severity",
-            "bubble_mgc_baseline_mr.pdf", mcid_val = 3)
-```
-
-# Conditional prediction intervals
-
-Expected placebo change at representative baseline severity values, from the univariable baseline-severity meta-regression models.  
-`predict.rma(newmods = value)` returns: `pred` (fitted slope at that baseline), `ci.lb/ub` (CI around the mean expected effect), `pi.lb/ub` (PI for a new trial at that value, using residual tau^2).  
-The PI is narrower than the unconditional PI because between-study variance explained by baseline severity has been removed.
-
-```{r}
-print_cond_pi <- function(model, scenarios, outcome, scale_label) {
-  cat(sprintf("\n--- %s ---\n", outcome))
-  cat(sprintf("%-18s %8s %8s %8s %8s %8s\n",
-              scale_label, "Pred", "CI_lb", "CI_ub", "PI_lb", "PI_ub"))
-  lapply(scenarios, function(b) {
-    p <- predict(model, newmods = b, level = 0.95)
-    cat(sprintf("%-18s %8.3f %8.3f %8.3f %8.3f %8.3f\n",
-                paste0(scale_label, " = ", b),
-                p$pred, p$ci.lb, p$ci.ub, p$pi.lb, p$pi.ub))
-    tibble(Outcome = outcome, Baseline = b,
-           Pred  = round(p$pred,3),  CI_lb = round(p$ci.lb,3),
-           CI_ub = round(p$ci.ub,3), PI_lb = round(p$pi.lb,3),
-           PI_ub = round(p$pi.ub,3))
-  })
-}
-
-# All-trials conditional PI
-cpi_mgadl <- print_cond_pi(mr_mgadl_base, c(5, 7, 9),    "MG-ADL", "MG-ADL")
-cpi_qmg   <- print_cond_pi(mr_qmg_base,   c(8, 12, 15),  "QMG",    "QMG")
-cpi_mgc   <- print_cond_pi(mr_mgc_base,   c(10, 15, 20), "MGC",    "MGC")
-cond_pi   <- bind_rows(cpi_mgadl, cpi_qmg, cpi_mgc)
-write.csv(cond_pi, "results_conditional_pi.csv", row.names = FALSE)
-
-# Contemporary-subset conditional PI (used in Table 4A)
-mr_mgadl_base_modern <- rma(yi = mgadl_change, vi = mgadl_vi, mods = ~ baseline_mgadl,
-                            method = "REML", test = "knha", slab = study_id,
-                            data = filter(d_mgadl_modern, !is.na(baseline_mgadl)))
-mr_qmg_base_modern   <- rma(yi = qmg_change, vi = qmg_vi, mods = ~ baseline_qmg,
-                            method = "REML", test = "knha", slab = study_id,
-                            data = filter(d_qmg_modern, !is.na(baseline_qmg)))
-mr_mgc_base_modern   <- rma(yi = mgc_change, vi = mgc_vi, mods = ~ baseline_mgc,
-                            method = "REML", test = "knha", slab = study_id,
-                            data = filter(d_mgc_modern, !is.na(baseline_mgc)))
-
-cat("\n", strrep("=", 60),
-    "\nCONDITIONAL PI - CONTEMPORARY (2017+)\n",
-    strrep("=", 60), "\n", sep = "")
-cat(sprintf("k with baseline: MG-ADL=%d  QMG=%d  MGC=%d\n",
-            mr_mgadl_base_modern$k, mr_qmg_base_modern$k, mr_mgc_base_modern$k))
-
-cpi_mgadl_modern <- print_cond_pi(mr_mgadl_base_modern, c(5, 7, 9),    "MG-ADL", "MG-ADL")
-cpi_qmg_modern   <- print_cond_pi(mr_qmg_base_modern,   c(8, 12, 15),  "QMG",    "QMG")
-cpi_mgc_modern   <- print_cond_pi(mr_mgc_base_modern,   c(10, 15, 20), "MGC",    "MGC")
-cond_pi_modern   <- bind_rows(cpi_mgadl_modern, cpi_qmg_modern, cpi_mgc_modern)
-write.csv(cond_pi_modern, "results_conditional_pi_contemporary.csv", row.names = FALSE)
-```
-
-# Joint conditional PI (baseline severity + timepoint)
-
-Two-predictor models give the PI for a new trial at a specific baseline AND timepoint combination. Residual tau^2 is smaller than the univariable models, so PIs are tighter.  
-Scenarios: timepoints 12, 24, 52 weeks; baselines MG-ADL 5/7/9, QMG 8/12/15, MGC 10/15/20.
-
-```{r}
-mr_mgadl_tp_adj <- rma(yi = mgadl_change, vi = mgadl_vi,
-                       mods = ~ tp_mgadl_wk + baseline_mgadl,
-                       method = "REML", test = "knha",
-                       data = filter(d_mgadl, !is.na(tp_mgadl_wk), !is.na(baseline_mgadl)))
-mr_qmg_tp_adj   <- rma(yi = qmg_change, vi = qmg_vi,
-                       mods = ~ tp_qmg_wk + baseline_qmg,
-                       method = "REML", test = "knha",
-                       data = filter(d_qmg, !is.na(tp_qmg_wk), !is.na(baseline_qmg)))
-mr_mgc_tp_adj   <- rma(yi = mgc_change, vi = mgc_vi,
-                       mods = ~ tp_mgc_wk + baseline_mgc,
-                       method = "REML", test = "knha",
-                       data = filter(d_mgc, !is.na(tp_mgc_wk), !is.na(baseline_mgc)))
-
-make_joint_pi <- function(model, baselines, timepoints, outcome) {
-  grid <- expand.grid(tp = timepoints, baseline = baselines)
-  preds <- predict(model, newmods = cbind(grid$tp, grid$baseline), level = 0.95)
-  tibble(
-    Outcome      = outcome,
-    Timepoint_wk = grid$tp,
-    Baseline     = grid$baseline,
-    Pred         = round(preds$pred,  3),
-    CI_lb        = round(preds$ci.lb, 3),
-    CI_ub        = round(preds$ci.ub, 3),
-    PI_lb        = round(preds$pi.lb, 3),
-    PI_ub        = round(preds$pi.ub, 3)
-  )
-}
-
-tp_scenarios <- c(12, 24, 52)
-joint_mgadl  <- make_joint_pi(mr_mgadl_tp_adj, c(5, 7, 9),    tp_scenarios, "MG-ADL")
-joint_qmg    <- make_joint_pi(mr_qmg_tp_adj,   c(8, 12, 15),  tp_scenarios, "QMG")
-joint_mgc    <- make_joint_pi(mr_mgc_tp_adj,   c(10, 15, 20), tp_scenarios, "MGC")
-joint_pi     <- bind_rows(joint_mgadl, joint_qmg, joint_mgc)
-
-write.csv(joint_pi, "results_joint_conditional_pi.csv", row.names = FALSE)
-```
-
 # MCID probabilities
 
 P(future trial mean change >= MCID) from the predictive distribution: t_{k-2} centered at mu, scale = sqrt(tau^2 + SE_mu^2).  
-MCID thresholds: MG-ADL >= 2 (Muppidi 2011); QMG >= 2-3 (Burns 2010; Barnett 2012); MGC >= 3 (Burns 2010).
+MCID thresholds: MG-ADL >= 2; QMG >= 2 or >=3; MGC >= 3.
 
 ```{r}
 mcid_prob <- function(model, mcid, outcome_label, subgroup_label) {
@@ -679,7 +482,6 @@ mr_summary <- bind_rows(
   # MG-ADL
   extract_mr(mr_mgadl_age,    "Mean age",                       "MG-ADL", sum(!is.na(d_mgadl$age_mean))),
   extract_mr(mr_mgadl_sex,    "Female%",                        "MG-ADL", sum(!is.na(d_mgadl$female_pct))),
-  extract_mr(mr_mgadl_base,   "Baseline MG-ADL",                "MG-ADL", sum(!is.na(d_mgadl$baseline_mgadl))),
   extract_mr(mr_mgadl_mgfa,   "MGFA %III-V",                    "MG-ADL", sum(!is.na(d_mgadl$mgfa_severe_pct))),
   extract_mr(mr_mgadl_achr,   "AChR%",                          "MG-ADL", sum(!is.na(d_mgadl$achr_pct))),
   extract_mr(mr_mgadl_route,  "Route (ref=IV)",                 "MG-ADL", nrow(d_mgadl)),
@@ -691,7 +493,6 @@ mr_summary <- bind_rows(
   # QMG
   extract_mr(mr_qmg_age,    "Mean age",                  "QMG", sum(!is.na(d_qmg$age_mean))),
   extract_mr(mr_qmg_sex,    "Female%",                   "QMG", sum(!is.na(d_qmg$female_pct))),
-  extract_mr(mr_qmg_base,   "Baseline QMG",              "QMG", sum(!is.na(d_qmg$baseline_qmg))),
   extract_mr(mr_qmg_mgfa,   "MGFA %III-V",               "QMG", sum(!is.na(d_qmg$mgfa_severe_pct))),
   extract_mr(mr_qmg_achr,   "AChR%",                     "QMG", sum(!is.na(d_qmg$achr_pct))),
   extract_mr(mr_qmg_route,  "Route (ref=IV)",            "QMG", nrow(d_qmg)),
@@ -703,7 +504,6 @@ mr_summary <- bind_rows(
   # MGC
   extract_mr(mr_mgc_age,    "Mean age",                  "MGC", sum(!is.na(d_mgc$age_mean))),
   extract_mr(mr_mgc_sex,    "Female%",                   "MGC", sum(!is.na(d_mgc$female_pct))),
-  extract_mr(mr_mgc_base,   "Baseline MGC",              "MGC", sum(!is.na(d_mgc$baseline_mgc))),
   extract_mr(mr_mgc_mgfa,   "MGFA %III-V",               "MGC", sum(!is.na(d_mgc$mgfa_severe_pct))),
   extract_mr(mr_mgc_achr,   "AChR%",                     "MGC", sum(!is.na(d_mgc$achr_pct))),
   extract_mr(mr_mgc_route,  "Route (ref=IV)",            "MGC", nrow(d_mgc)),

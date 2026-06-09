@@ -105,6 +105,4 @@ Where the source publication reported a standard error (SE) or 95% confidence in
 
 ## Notes on the dataset
 
-- All numeric extractions are at the placebo arm level and active-arm data are not included.
-- Trial-level summaries reflect the placebo-arm population at randomization. 
-- Free-text fields (`steroid_change_details`, `rescue_type`, `tp_*_raw`) contain extraction notes that record how ambiguous cases were classified; downstream analyses use the structured numeric and factor columns.
+- Free-text fields (`steroid_change_details`, `rescue_type`, `tp_*_raw`) contain extraction notes that record how ambiguous cases were classified.

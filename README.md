@@ -6,7 +6,7 @@ Code and data for the systematic review and meta-analysis of placebo-arm respons
 
 If you use this code or data, please cite:
 
-> Jones FJS, Iaali H, Prokop LJ, Skolka M, Naddaf E. Placebo-arm responses in generalized myasthenia gravis immunotherapy trials: a systematic review and meta-analysis. *[Journal]* (in submission).
+> Jones FJS, Iaali H, Prokop LJ, Lee MK, Geyer SM, Skolka M, Shaibani A, Hassan Murad M, Naddaf E. Meta-Analysis of Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials. *[Journal]* (in submission).
 
 Protocol registered with PROSPERO: CRD420251074417.
 
@@ -14,7 +14,7 @@ Protocol registered with PROSPERO: CRD420251074417.
 
 | File | Description |
 | --- | --- |
-| `Meta_analysis_code.Rmd` | Full analysis pipeline: pooling, subgroup and sensitivity analyses, meta-regression, conditional predictions, MCID probabilities |
+| `Meta_analysis_code.Rmd` | Full analysis pipeline: pooling, subgroup and sensitivity analyses, meta-regression, MCID probabilities |
 | `mg_placebo_clean_v5.csv` | Extracted trial-level dataset (28 trials, 57 variables) |
 | `data_dictionary.md` | Column-by-column description of the dataset |
 | `mg-placebo-meta-analysis.Rproj` | RStudio project file (sets the working directory automatically) |
@@ -49,14 +49,11 @@ CSV files (results tables):
 - `results_primary_summary.csv` — primary pooled estimates with 95% CI, PI, *I²*, *τ²*
 - `results_subgroup_summary.csv` — pooled estimates across all 5 subgroups (primary, contemporary, stable steroids, phase 3, excluding crossover)
 - `results_metaregression.csv` — univariable meta-regression results with β, SE, *p*, R²
-- `results_conditional_pi.csv` — conditional predictions from baseline-severity meta-regression (all trials)
-- `results_conditional_pi_contemporary.csv` — conditional predictions, contemporary subset
-- `results_joint_conditional_pi.csv` — joint predictions conditioning on baseline severity and assessment timepoint
 - `results_mcid.csv` — minimal clinically important difference probabilities (all trials and subgroups)
 - `results_mcid_contemporary.csv` — MCID probabilities, contemporary subset
 - `results_within_trial_sd.csv` — descriptive summary of within-trial SD of placebo-arm change
 
-PDF figures: primary forest plots, subgroup forest plots (contemporary, stable, phase 3, excluding crossover), leave-one-out sensitivity plots, and meta-regression bubble plots for baseline severity and assessment timepoint.
+PDF figures: primary forest plots, subgroup forest plots (contemporary, stable, phase 3, excluding crossover), leave-one-out sensitivity plots.
 
 ## Methods summary
 
@@ -76,4 +73,4 @@ Data (`mg_placebo_clean_v5.csv`) is released under [Creative Commons Attribution
 
 ## Contact
 
-Felipe J. S. Jones — corresponding author (see manuscript).
+Elie Naddaf — corresponding author (see manuscript).
