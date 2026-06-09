@@ -1,6 +1,6 @@
 # Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials
 
-Code and data for the systematic review and meta-analysis of placebo-arm responses in randomized, double-blind, placebo-controlled trials of immunotherapy in generalized myasthenia gravis (gMG).
+Code and data for the systematic review and meta-analysis of placebo-arm changes in randomized, double-blind, placebo-controlled trials of immunotherapy in generalized myasthenia gravis (gMG).
 
 ## Citation
 
