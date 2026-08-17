@@ -6,7 +6,7 @@ Code and data for the systematic review and meta-analysis of placebo-arm changes
 
 If you use this code or data, please cite:
 
-> Jones FJS, Iaali H, Prokop LJ, Lee MK, Geyer SM, Skolka M, Shaibani A, Hassan Murad M, Naddaf E. Meta-Analysis of Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials. *[Journal]* (in submission).
+> Jones FJS, Iaali H, Prokop LJ, Lee MK, Skolka M, Shaibani A, Hassan Murad M, Naddaf E. Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials: A Meta-analysis.
 
 Protocol registered with PROSPERO: CRD420251074417.
 
@@ -54,16 +54,6 @@ CSV files (results tables):
 - `results_within_trial_sd.csv` — descriptive summary of within-trial SD of placebo-arm change
 
 PDF figures: primary forest plots, subgroup forest plots (contemporary, stable, phase 3, excluding crossover), leave-one-out sensitivity plots.
-
-## Methods summary
-
-Random-effects models were fit using restricted maximum likelihood (REML) with the Knapp–Hartung adjustment. Ninety-five percent prediction intervals were computed for every model as
-
-> μ̂ ± *t*₁₋ₐ/₂, *k*−2 × √(τ̂² + SE(μ̂)²)
-
-Per-trial estimates of placebo-arm mean change were extracted as reported in each publication, with SE or 95% CI converted to SD where necessary using SD = SE × √n or SD = √n × (upper − lower) / (2 × 1.96). Sampling variance per trial is `vi = SD² / n` and standard error per trial is `sei = SD / √n`, both computed at extraction.
-
-For full methods see the manuscript.
 
 ## License
 

@@ -1,5 +1,5 @@
 ---
-title: "Meta-Analysis of Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials"
+title: "Placebo-Arm Change in Generalized Myasthenia Gravis Immunotherapy Trials: A Meta-analysis"
 author: "Felipe J. S. Jones"
 output:
   html_document:
@@ -7,9 +7,9 @@ output:
     toc_depth: 2
 ---
 
-This R Markdown document reproduces the meta-analysis reported in Jones et al.
+This R Markdown document reproduces the meta-analysis reported in the manuscript.
 
-Open `mg-placebo-meta-analysis.Rproj` in RStudio before running, so the working directory is set to the repository root and `mg_placebo_clean_v5.csv` is found by relative path. Running all chunks writes result CSVs and PDF figures to the repository root.
+Open `mg-placebo-meta-analysis.Rproj` in RStudio before running, so the working directory is set to the repository root and `mg_placebo_clean_v5.csv` is found by relative path.
 
 # Packages
 
@@ -20,6 +20,7 @@ library(ggplot2)
 library(tibble)
 library(ggrepel)
 library(scales)
+library(here)
 ```
 
 # Load and prepare data
@@ -27,22 +28,54 @@ library(scales)
 ```{r}
 df <- read.csv("mg_placebo_clean_v5.csv", stringsAsFactors = FALSE) |>
   mutate(
-    phase           = as.character(phase),
+    phase     = factor(phase, levels = c("2","3"), labels = c("Phase 2","Phase 3")),
     route           = factor(route, levels = c("IV", "SC", "PO")),
     year            = as.integer(year),
     era_2017        = factor(ifelse(year >= 2017, "2017_plus", "pre_2017"),
                              levels = c("pre_2017", "2017_plus")),
-    crossover       = study_id %in% c("Howard 2013", "Tindall 1993"),
+    crossover = factor(ifelse(study_id %in% c("Howard 2013","Tindall 1993"),
+                          "Crossover","Parallel"),
+                   levels = c("Parallel","Crossover")),
     steroid_change  = factor(steroid_change, levels = c("Stable", "Taper")),
     rescue_rate_num = as.numeric(rescue_rate)
   )
 ```
 
-# Analysis subsets
+## Risk of bias (Cochrane RoB 1, seven domains)
 
-MG-ADL: excludes 5 studies not reporting MG-ADL  
-QMG: excludes 3 studies with missing SD  
-MGC: all studies with change and variance available
+```{r}
+rob_raw <- read.csv(
+  "review-640239-consensus-only-quality-assessment-study-per-row-20260508015146.csv",
+  header = FALSE, stringsAsFactors = FALSE, skip = 2
+)
+
+jcols <- c(2, 5, 8, 11, 14, 17, 20)
+rob <- data.frame(study_id = trimws(rob_raw[[1]]), rob_raw[jcols],
+                  stringsAsFactors = FALSE)
+names(rob)[-1] <- c("d1","d2","d3","d4","d5","d6","d7")
+rob <- rob[rob$study_id != "", ]
+
+# Per-domain symbols (A-G): + low, ? unclear, - high
+sym_map <- c(low = "+", unclear = "?", high = "\u2212")
+to_sym  <- function(x) sym_map[tolower(trimws(x))]
+rob[paste0("rob_", LETTERS[1:7])] <- lapply(rob[paste0("d", 1:7)], to_sym)
+
+# Overall RoB = worst domain
+sev <- c(low = 1, unclear = 2, high = 3)
+rob$rob_overall <- vapply(seq_len(nrow(rob)), function(i) {
+  vals <- tolower(trimws(unlist(rob[i, paste0("d", 1:7)])))
+  names(which.max(sev[vals]))
+}, character(1))
+rob$rob_overall <- factor(rob$rob_overall, levels = c("low","unclear","high"),
+                          labels = c("Low","Some concerns","High"))
+
+df <- left_join(df,
+                rob[, c("study_id", "rob_overall", paste0("rob_", LETTERS[1:7]))],
+                by = "study_id")
+stopifnot(all(!is.na(df$rob_overall)))
+```
+
+# Analysis subsets
 
 ```{r}
 d_mgadl <- df |> filter(!is.na(mgadl_change), !is.na(mgadl_vi))
@@ -55,8 +88,7 @@ d_mgc   <- df |> filter(!is.na(mgc_change),   !is.na(mgc_vi))
 ```{r}
 run_primary <- function(data, yi_col, vi_col, label) {
   m <- rma(yi = data[[yi_col]], vi = data[[vi_col]],
-           method = "REML", test = "knha",
-           slab = data$study_id, data = data)
+           method = "REML", test = "knha", slab = data$study_id, data = data)
   cat("\n", strrep("=", 60), "\n", label, "\n", strrep("=", 60), "\n", sep = "")
   print(summary(m))
   pi <- predict(m, level = 0.95)
@@ -66,10 +98,8 @@ run_primary <- function(data, yi_col, vi_col, label) {
 }
 
 run_metareg <- function(data, yi_col, vi_col, moderator_formula, label, mod_label) {
-  m <- rma(yi = data[[yi_col]], vi = data[[vi_col]],
-           mods = moderator_formula,
-           method = "REML", test = "knha",
-           slab = data$study_id, data = data)
+  m <- rma(yi = data[[yi_col]], vi = data[[vi_col]], mods = moderator_formula,
+           method = "REML", test = "knha", slab = data$study_id, data = data)
   cat(sprintf("\n[%s | %s -- k=%d]\n", label, mod_label, m$k))
   print(summary(m))
   m
@@ -81,8 +111,7 @@ run_subgroup <- function(data, yi_col, vi_col, outcome_label, subset_label) {
     return(invisible(NULL))
   }
   m  <- rma(yi = data[[yi_col]], vi = data[[vi_col]],
-            method = "REML", test = "knha",
-            slab = data$study_id, data = data)
+            method = "REML", test = "knha", slab = data$study_id, data = data)
   pi <- predict(m)
   cat(sprintf("  %-30s  k=%2d  est=%6.3f [%6.3f, %6.3f]  PI [%6.3f, %6.3f]  I2=%.1f%%\n",
               subset_label, nrow(data),
@@ -94,19 +123,14 @@ results_table <- function(model, outcome_label, subgroup_label = NA_character_) 
   pi      <- predict(model)
   ci_tau2 <- confint(model)$random
   tibble(
-    Subgroup      = subgroup_label,
-    Outcome       = outcome_label,
-    k             = model$k,
-    Estimate      = round(model$b[1], 3),
-    CI_lower      = round(model$ci.lb, 3),
-    CI_upper      = round(model$ci.ub, 3),
-    PI_lower      = round(pi$pi.lb, 3),
-    PI_upper      = round(pi$pi.ub, 3),
-    I2_pct        = round(model$I2, 1),
-    tau2          = round(model$tau2, 4),
+    Subgroup = subgroup_label, Outcome = outcome_label, k = model$k,
+    Estimate = round(model$b[1], 3),
+    CI_lower = round(model$ci.lb, 3), CI_upper = round(model$ci.ub, 3),
+    PI_lower = round(pi$pi.lb, 3),    PI_upper = round(pi$pi.ub, 3),
+    I2_pct = round(model$I2, 1), tau2 = round(model$tau2, 4),
     tau2_CI_lower = round(ci_tau2["tau^2", "ci.lb"], 4),
     tau2_CI_upper = round(ci_tau2["tau^2", "ci.ub"], 4),
-    Q_p           = round(model$QEp, 4)
+    Q_p = round(model$QEp, 4)
   )
 }
 
@@ -114,14 +138,179 @@ extract_mr <- function(model, moderator_label, outcome_label, n) {
   cs  <- coef(summary(model))
   row <- if (nrow(cs) > 1) cs[2, ] else cs[1, ]
   tibble(
-    Outcome   = outcome_label,
-    Moderator = moderator_label,
-    k         = n,
-    beta      = round(as.numeric(row[["estimate"]]), 4),
-    SE        = round(as.numeric(row[["se"]]),       4),
-    p_value   = round(as.numeric(row[["pval"]]),     4),
-    R2        = round(max(0, model$R2), 1)
+    Outcome = outcome_label, Moderator = moderator_label, k = n,
+    beta = round(as.numeric(row[["estimate"]]), 4),
+    SE   = round(as.numeric(row[["se"]]),       4),
+    p_value = round(as.numeric(row[["pval"]]),  4),
+    R2   = round(max(0, model$R2), 1)
   )
+}
+```
+
+# Grouped forest plot 
+
+```{r}
+fmtp <- function(p) if (p < 0.001) "< 0.001" else sprintf("= %.3f", p)
+
+plot_forest_metafor_grouped <- function(data, yi_col, vi_col, change_col, sd_col,
+                                        subgroup_col, subgroup_levels, subgroup_labels,
+                                        outcome_label, filename,
+                                        width = 19, height = NULL,
+                                        axis_by = 1,
+                                        gap_between = 3,
+                                        font_scale = 1.65) {   # multiply all text sizes
+
+  d <- data[!is.na(data[[subgroup_col]]), ]
+  d[[subgroup_col]] <- factor(d[[subgroup_col]], levels = subgroup_levels)
+  d <- d[order(d[[subgroup_col]], d$year), ]
+
+  m_all <- rma(yi = d[[yi_col]], vi = d[[vi_col]], method = "REML", test = "knha",
+               slab = d$study_id, data = d)
+  m_mod <- rma(yi = d[[yi_col]], vi = d[[vi_col]],
+               mods = as.formula(paste0("~ ", subgroup_col)),
+               method = "REML", test = "knha", data = d)
+  p_between <- m_mod$QMp
+
+  grp_idx  <- split(seq_len(nrow(d)), d[[subgroup_col]])[subgroup_levels]
+  grp_fits <- lapply(grp_idx, function(ix)
+    rma(yi = d[[yi_col]][ix], vi = d[[vi_col]][ix], method = "REML", test = "knha"))
+
+  ng    <- length(grp_idx)
+  sizes <- vapply(grp_idx, length, integer(1))
+  rows    <- numeric(0); headers <- numeric(ng); subtot <- numeric(ng)
+  cur <- sum(sizes) + ng * 2 + (ng - 1) * gap_between + 2
+  for (g in seq_len(ng)) {
+    headers[g] <- cur + 1
+    grp_rows   <- seq(cur, cur - sizes[g] + 1)
+    rows       <- c(rows, grp_rows)
+    subtot[g]  <- min(grp_rows) - 1.2
+    extra      <- if (g == ng) 2.5 else 1.0   # room for PI bar + shifted annotation lines
+    cur        <- subtot[g] - 2.0 - extra - gap_between
+  }
+  d <- d[unlist(grp_idx), ]
+  rob_cols <- paste0("rob_", LETTERS[1:7])
+  circ_col <- c("+"="#2c9c2c", "?"="#e8c020", "\u2212"="#cc2222")
+
+  if (is.null(height)) height <- 0.28 * (nrow(d) + ng * gap_between) + 7
+
+  ci      <- 1.96 * sqrt(d[[vi_col]])
+  alim_lo <- floor(min(d[[yi_col]] - ci, na.rm = TRUE)) - 1   # widen plot left
+  alim_hi <- ceiling(max(max(d[[yi_col]] + ci, na.rm = TRUE), 0)) + 1  # widen plot right
+  aspan   <- alim_hi - alim_lo
+
+  ## ---- Gutters sized to give the forest data region more of the width ----
+  xlim_left  <- alim_lo - 4.2 * aspan     # left gutter (N, weight, RoB)
+  xlim_right <- alim_hi + 3.4 * aspan     # right gutter holds 3 tight columns
+
+  ## LEFT columns live in the left gutter
+  x_n     <- alim_lo - 2.35 * aspan
+  x_wt    <- alim_lo - 1.95 * aspan
+  x_rob0  <- alim_lo - 1.60 * aspan
+  x_rob_step <- 0.145 * aspan
+
+  ## RIGHT columns: packed tight near the right edge
+  x_ci    <- alim_hi + 1.30 * aspan       # Change [95% CI] (widest text)
+  x_pi    <- alim_hi + 2.35 * aspan       # 95% PI
+  x_sd    <- alim_hi + 3.00 * aspan       # SD
+
+  est_ci <- sprintf("%.2f [%.2f, %.2f]", d[[yi_col]], d[[yi_col]] - ci, d[[yi_col]] + ci)
+  wt_all <- weights(m_all)
+
+  ## Overall block sits below the final subgroup's lowest annotation
+  ## (final subgroup: het at subtot-2.0, between-group test at subtot-3.0)
+  y_overall <- subtot[ng] - 5.0
+  y_opi     <- y_overall - 1.0   # overall 95% PI bar, one row below diamond
+  y_ohet    <- y_overall - 1.8
+
+  render <- function() {
+    par(mar = c(11, 4, 3, 2))
+
+  metafor::forest(
+    m_all,
+    rows      = rows,
+    ylim      = c(y_ohet - 0.8, max(headers) + 3),
+    xlim      = c(xlim_left, xlim_right),
+    alim      = c(alim_lo, alim_hi),
+    at        = seq(alim_lo, alim_hi, by = axis_by),
+    slab      = d$study_id,
+    ilab      = cbind(d$n_placebo, sprintf("%.1f%%", wt_all),
+                      est_ci, sprintf("%.1f", d[[sd_col]])),
+    ilab.xpos = c(x_n, x_wt, x_ci, x_sd),
+    header    = "Study",
+    xlab      = paste0(outcome_label, " change from baseline"),
+    refline   = 0, col = "steelblue", cex = 0.75 * font_scale,
+    annotate  = FALSE, addfit = FALSE
+  )
+
+  op <- par(font = 2, cex = 0.72 * font_scale)
+  text(x_n,  max(headers) + 2, "N")
+  text(x_wt, max(headers) + 2, "Weight")
+  text(x_rob0 + (0:6) * x_rob_step, max(headers) + 2, LETTERS[1:7])
+  text(x_ci, max(headers) + 2, paste0(outcome_label, " [95% CI]"))
+  text(x_pi, max(headers) + 2, "95% PI")  # PI reported only for pooled/subtotal rows (bars below diamonds)
+  text(x_sd, max(headers) + 2, "SD")
+  par(op)
+
+  for (j in 1:7) {
+    sym <- as.character(d[[rob_cols[j]]]); xj <- x_rob0 + (j - 1) * x_rob_step
+    points(rep(xj, nrow(d)), rows, pch = 21, bg = circ_col[sym], col = "grey40", cex = 1.4 * font_scale)
+    text(rep(xj, nrow(d)), rows, sym, cex = 0.55 * font_scale)
+  }
+
+  for (g in seq_len(ng)) {
+    text(xlim_left, headers[g], subgroup_labels[g], pos = 4, font = 2, cex = 0.8 * font_scale)
+    fit <- grp_fits[[g]]; pig <- predict(fit)
+    addpoly(fit, row = subtot[g], mlab = "", col = "navy", cex = 0.75 * font_scale)
+    ## 95% PI as a separate horizontal bar one row below the diamond
+    segments(pig$pi.lb, subtot[g] - 1, pig$pi.ub, subtot[g] - 1, col = "navy", lwd = 1.4)
+    segments(c(pig$pi.lb, pig$pi.ub), subtot[g] - 1 - 0.15,
+             c(pig$pi.lb, pig$pi.ub), subtot[g] - 1 + 0.15, col = "navy", lwd = 1.4)
+    text(x_ci, subtot[g], sprintf("%.2f [%.2f, %.2f]",
+         as.numeric(fit$b), fit$ci.lb, fit$ci.ub), cex = 0.70 * font_scale, font = 2)
+    text(x_pi, subtot[g] - 1, sprintf("[%.2f, %.2f]", pig$pi.lb, pig$pi.ub), cex = 0.70 * font_scale, font = 2)
+    text(xlim_left, subtot[g] - 2.0, pos = 4, cex = 0.72 * font_scale,
+         bquote(paste("Subgroup heterogeneity: ", I^2, "=", .(sprintf("%.1f%%", fit$I2)),
+                      ", ", tau^2, "=", .(sprintf("%.3f", fit$tau2)),
+                      ", p ", .(fmtp(fit$QEp)))))
+    if (g == ng) {
+      text(xlim_left, subtot[g] - 3.0, pos = 4, cex = 0.72 * font_scale,
+           bquote(paste("Test for subgroup differences (HK): p ", .(fmtp(p_between)))))
+    }
+  }
+
+  pi_all <- predict(m_all)
+  addpoly(m_all, row = y_overall, mlab = "Overall (HK)", col = "black", cex = 0.8 * font_scale)
+  ## 95% PI as a separate horizontal bar one row below the overall diamond
+  segments(pi_all$pi.lb, y_opi, pi_all$pi.ub, y_opi, col = "black", lwd = 1.4)
+  segments(c(pi_all$pi.lb, pi_all$pi.ub), y_opi - 0.15,
+           c(pi_all$pi.lb, pi_all$pi.ub), y_opi + 0.15, col = "black", lwd = 1.4)
+  text(xlim_left, y_opi, "95% prediction interval", pos = 4, cex = 0.70 * font_scale, font = 3)
+  text(x_ci, y_overall, sprintf("%.2f [%.2f, %.2f]",
+       as.numeric(m_all$b), m_all$ci.lb, m_all$ci.ub), cex = 0.72 * font_scale, font = 2)
+  text(x_pi, y_opi, sprintf("[%.2f, %.2f]", pi_all$pi.lb, pi_all$pi.ub), cex = 0.72 * font_scale, font = 2)
+  text(xlim_left, y_ohet, pos = 4, cex = 0.72 * font_scale,
+       bquote(paste("Overall heterogeneity: ", I^2, "=", .(sprintf("%.1f%%", m_all$I2)),
+                    ", ", tau^2, "=", .(sprintf("%.3f", m_all$tau2)),
+                    ", p ", .(fmtp(m_all$QEp)))))
+
+  dom <- c("(A) Bias arising from the randomization process (sequence generation)",
+           "(B) Bias due to allocation concealment",
+           "(C) Bias due to blinding of participants and personnel",
+           "(D) Bias due to blinding of outcome assessment",
+           "(E) Bias due to missing outcome data",
+           "(F) Bias in selection of the reported result",
+           "(G) Bias from other sources")
+  mtext("Risk of bias:  + low    ? unclear    \u2212 high",
+        side = 1, line = 4.0, adj = 0, cex = 0.68 * font_scale, font = 2)
+  for (i in seq_along(dom)) mtext(dom[i], side = 1, line = 4.0 + i * 0.80, adj = 0, cex = 0.6 * font_scale)
+
+  }
+
+  pdf(paste0(filename, ".pdf"), width = width, height = height)
+  render(); dev.off()
+  tiff(paste0(filename, ".tiff"), width = width, height = height,
+       units = "in", res = 300, compression = "lzw")
+  render(); dev.off()
 }
 ```
 
@@ -133,39 +322,25 @@ m_qmg   <- run_primary(d_qmg,   "qmg_change",   "qmg_vi",   "QMG")
 m_mgc   <- run_primary(d_mgc,   "mgc_change",   "mgc_vi",   "MGC")
 ```
 
-# Forest plots
+# Forest plots grouped by era (main figures)
 
 ```{r}
-plot_primary_forest <- function(model, data, label, filename, width = 10, height = NULL) {
-  if (is.null(height)) height <- max(6, 0.3 * model$k + 3)
-  ord <- order(data$year)
-  pdf(filename, width = width, height = height)
-  forest.rma(
-    model, order = ord, slab = data$study_id,
-    xlab    = paste0("Mean change from baseline (", label, ")"),
-    main    = paste0("Placebo arm \u2212 ", label),
-    header  = c("Study", "Mean change [95% CI]"),
-    refline = 0, col = "steelblue",
-    addfit = TRUE, addcred = TRUE, shade = "zebra"
-  )
-  text(x = par("usr")[1], y = -1.5,
-       labels = bquote(I^2 == .(sprintf("%.1f%%", model$I2)) ~
-                       "  " ~ tau^2 == .(sprintf("%.3f", model$tau2))),
-       adj = 0, cex = 0.8)
-  dev.off()
-}
-
-plot_primary_forest(m_mgadl, d_mgadl, "MG-ADL", "forest_mgadl_primary.pdf")
-plot_primary_forest(m_qmg,   d_qmg,   "QMG",    "forest_qmg_primary.pdf")
-plot_primary_forest(m_mgc,   d_mgc,   "MGC",    "forest_mgc_primary.pdf")
+plot_forest_metafor_grouped(d_mgadl, "mgadl_change", "mgadl_vi", "mgadl_change", "mgadl_change_sd",
+  "era_2017", c("pre_2017","2017_plus"), c("Pre-2017","Contemporary (2017+)"),
+  "MG-ADL", "forest_mgadl", axis_by = 1)
+plot_forest_metafor_grouped(d_qmg, "qmg_change", "qmg_vi", "qmg_change", "qmg_change_sd",
+  "era_2017", c("pre_2017","2017_plus"), c("Pre-2017","Contemporary (2017+)"),
+  "QMG", "forest_qmg", axis_by = 1)
+plot_forest_metafor_grouped(d_mgc, "mgc_change", "mgc_vi", "mgc_change", "mgc_change_sd",
+  "era_2017", c("pre_2017","2017_plus"), c("Pre-2017","Contemporary (2017+)"),
+  "MGC", "forest_mgc", axis_by = 2)
 ```
 
 # Subgroup analyses
 
-Subgroups: contemporary (2017+), stable steroid background therapy, phase 3 only, excluding crossover trials.
+Subgroups: contemporary vs older trials, stable vs taper steroids.
 
 ```{r}
-# Subset definitions
 d_mgadl_modern <- filter(d_mgadl, era_2017 == "2017_plus")
 d_qmg_modern   <- filter(d_qmg,   era_2017 == "2017_plus")
 d_mgc_modern   <- filter(d_mgc,   era_2017 == "2017_plus")
@@ -174,71 +349,99 @@ d_mgadl_stable <- filter(d_mgadl, steroid_change == "Stable")
 d_qmg_stable   <- filter(d_qmg,   steroid_change == "Stable")
 d_mgc_stable   <- filter(d_mgc,   steroid_change == "Stable")
 
-d_mgadl_p3 <- filter(d_mgadl, phase == "3")
-d_qmg_p3   <- filter(d_qmg,   phase == "3")
-d_mgc_p3   <- filter(d_mgc,   phase == "3")
-
-d_mgadl_nx <- filter(d_mgadl, !crossover)
-d_qmg_nx   <- filter(d_qmg,   !crossover)
-d_mgc_nx   <- filter(d_mgc,   !crossover)
-
-# Fit pooled models for each subgroup
 m_mgadl_modern <- run_subgroup(d_mgadl_modern, "mgadl_change", "mgadl_vi", "MG-ADL", "Contemporary (2017+)")
 m_qmg_modern   <- run_subgroup(d_qmg_modern,   "qmg_change",   "qmg_vi",   "QMG",    "Contemporary (2017+)")
 m_mgc_modern   <- run_subgroup(d_mgc_modern,   "mgc_change",   "mgc_vi",   "MGC",    "Contemporary (2017+)")
 
-m_mgadl_stable <- run_subgroup(d_mgadl_stable, "mgadl_change", "mgadl_vi", "MG-ADL", "Stable steroids only")
-m_qmg_stable   <- run_subgroup(d_qmg_stable,   "qmg_change",   "qmg_vi",   "QMG",    "Stable steroids only")
-m_mgc_stable   <- run_subgroup(d_mgc_stable,   "mgc_change",   "mgc_vi",   "MGC",    "Stable steroids only")
+m_mgadl_stable <- run_subgroup(d_mgadl_stable, "mgadl_change", "mgadl_vi", "MG-ADL", "Stable steroids")
+m_qmg_stable   <- run_subgroup(d_qmg_stable,   "qmg_change",   "qmg_vi",   "QMG",    "Stable steroids")
+m_mgc_stable   <- run_subgroup(d_mgc_stable,   "mgc_change",   "mgc_vi",   "MGC",    "Stable steroids")
+
+run_subgroup_test <- function(data, yi_col, vi_col, mod_var, outcome_label, mod_label) {
+  d <- data[!is.na(data[[mod_var]]), ]
+  d[[mod_var]] <- droplevels(factor(d[[mod_var]]))
+  levs <- levels(d[[mod_var]])
+  m_test <- rma(yi = d[[yi_col]], vi = d[[vi_col]],
+                mods = as.formula(paste0("~ ", mod_var)),
+                method = "REML", test = "knha", data = d)
+  p_between <- round(m_test$QMp, 4)
+  cat(sprintf("[%s | %s] between-group p = %.4f\n", outcome_label, mod_label, m_test$QMp))
+  bind_rows(lapply(levs, function(lv) {
+    di <- d[d[[mod_var]] == lv, ]
+    if (nrow(di) < 3) return(NULL)
+    mi <- rma(yi = di[[yi_col]], vi = di[[vi_col]],
+              method = "REML", test = "knha", data = di)
+    pi <- predict(mi)
+    tibble(Outcome = outcome_label, Subgroup = mod_label, Level = lv, k = mi$k,
+           Estimate = round(mi$b[1], 3),
+           CI_lower = round(mi$ci.lb, 3), CI_upper = round(mi$ci.ub, 3),
+           PI_lower = round(pi$pi.lb, 3), PI_upper = round(pi$pi.ub, 3),
+           I2_pct = round(mi$I2, 1), tau2 = round(mi$tau2, 4),
+           p_between = p_between)
+  }))
+}
+
+subgroup_specs <- list(
+  c(mod = "era_2017",       lab = "Contemporary vs pre-2017"),
+  c(mod = "steroid_change", lab = "Stable vs taper steroids")
+)
+
+subgroup_results <- bind_rows(lapply(subgroup_specs, function(s) {
+  bind_rows(
+    run_subgroup_test(d_mgadl, "mgadl_change", "mgadl_vi", s["mod"], "MG-ADL", s["lab"]),
+    run_subgroup_test(d_qmg,   "qmg_change",   "qmg_vi",   s["mod"], "QMG",    s["lab"]),
+    run_subgroup_test(d_mgc,   "mgc_change",   "mgc_vi",   s["mod"], "MGC",    s["lab"])
+  )
+}))
+print(subgroup_results, row.names = FALSE)
+write.csv(subgroup_results, "results_subgroup_summary.csv", row.names = FALSE)
+```
+
+## Steroid-subgroup forest plots (supplement)
+
+```{r}
+plot_forest_metafor_grouped(d_mgadl, "mgadl_change", "mgadl_vi", "mgadl_change", "mgadl_change_sd",
+  "steroid_change", c("Stable","Taper"), c("Stable steroids","Tapered steroids"),
+  "MG-ADL", "forest_mgadl_steroid", axis_by = 1)
+plot_forest_metafor_grouped(d_qmg, "qmg_change", "qmg_vi", "qmg_change", "qmg_change_sd",
+  "steroid_change", c("Stable","Taper"), c("Stable steroids","Tapered steroids"),
+  "QMG", "forest_qmg_steroid", axis_by = 1)
+plot_forest_metafor_grouped(d_mgc, "mgc_change", "mgc_vi", "mgc_change", "mgc_change_sd",
+  "steroid_change", c("Stable","Taper"), c("Stable steroids","Tapered steroids"),
+  "MGC", "forest_mgc_steroid", axis_by = 2)
+```
+
+# Sensitivity analyses
+
+Restricted fits: phase 3 only, parallel only.
+
+```{r}
+d_mgadl_p3 <- filter(d_mgadl, phase == "Phase 3")
+d_qmg_p3   <- filter(d_qmg,   phase == "Phase 3")
+d_mgc_p3   <- filter(d_mgc,   phase == "Phase 3")
+
+d_mgadl_nx <- filter(d_mgadl, crossover == "Parallel")
+d_qmg_nx   <- filter(d_qmg,   crossover == "Parallel")
+d_mgc_nx   <- filter(d_mgc,   crossover == "Parallel")
 
 m_mgadl_p3 <- run_subgroup(d_mgadl_p3, "mgadl_change", "mgadl_vi", "MG-ADL", "Phase 3 only")
 m_qmg_p3   <- run_subgroup(d_qmg_p3,   "qmg_change",   "qmg_vi",   "QMG",    "Phase 3 only")
 m_mgc_p3   <- run_subgroup(d_mgc_p3,   "mgc_change",   "mgc_vi",   "MGC",    "Phase 3 only")
 
-m_mgadl_nx <- run_subgroup(d_mgadl_nx, "mgadl_change", "mgadl_vi", "MG-ADL", "Excluding crossover")
-m_qmg_nx   <- run_subgroup(d_qmg_nx,   "qmg_change",   "qmg_vi",   "QMG",    "Excluding crossover")
-m_mgc_nx   <- run_subgroup(d_mgc_nx,   "mgc_change",   "mgc_vi",   "MGC",    "Excluding crossover")
-```
+m_mgadl_nx <- run_subgroup(d_mgadl_nx, "mgadl_change", "mgadl_vi", "MG-ADL", "Parallel only")
+m_qmg_nx   <- run_subgroup(d_qmg_nx,   "qmg_change",   "qmg_vi",   "QMG",    "Parallel only")
+m_mgc_nx   <- run_subgroup(d_mgc_nx,   "mgc_change",   "mgc_vi",   "MGC",    "Parallel only")
 
-## Forest plots for each subgroup
-
-```{r}
-plot_subgroup_forest <- function(model, slabs, outcome_label, subset_label, filename,
-                                 width = 10, height = NULL) {
-  if (is.null(height)) height <- max(6, 0.3 * model$k + 3)
-  pdf(filename, width = width, height = height)
-  forest.rma(
-    model, slab = slabs,
-    xlab    = paste0("Mean change from baseline (", outcome_label, ")"),
-    main    = paste0("Placebo arm \u2212 ", outcome_label, " (", subset_label, ")"),
-    addcred = TRUE, refline = 0, col = "steelblue", shade = "zebra"
-  )
-  text(x = par("usr")[1], y = -1.5,
-       labels = bquote(I^2 == .(sprintf("%.1f%%", model$I2)) ~
-                       "  " ~ tau^2 == .(sprintf("%.3f", model$tau2))),
-       adj = 0, cex = 0.8)
-  dev.off()
-}
-
-# Contemporary (2017+)
-plot_subgroup_forest(m_mgadl_modern, d_mgadl_modern$study_id, "MG-ADL", "2017+", "forest_mgadl_modern.pdf")
-plot_subgroup_forest(m_qmg_modern,   d_qmg_modern$study_id,   "QMG",    "2017+", "forest_qmg_modern.pdf")
-plot_subgroup_forest(m_mgc_modern,   d_mgc_modern$study_id,   "MGC",    "2017+", "forest_mgc_modern.pdf")
-
-# Stable steroid background
-plot_subgroup_forest(m_mgadl_stable, d_mgadl_stable$study_id, "MG-ADL", "stable background therapy", "forest_mgadl_stable.pdf")
-plot_subgroup_forest(m_qmg_stable,   d_qmg_stable$study_id,   "QMG",    "stable background therapy", "forest_qmg_stable.pdf")
-plot_subgroup_forest(m_mgc_stable,   d_mgc_stable$study_id,   "MGC",    "stable background therapy", "forest_mgc_stable.pdf")
-
-# Phase 3 only
-plot_subgroup_forest(m_mgadl_p3, d_mgadl_p3$study_id, "MG-ADL", "Phase 3 only", "forest_mgadl_phase3.pdf")
-plot_subgroup_forest(m_qmg_p3,   d_qmg_p3$study_id,   "QMG",    "Phase 3 only", "forest_qmg_phase3.pdf")
-plot_subgroup_forest(m_mgc_p3,   d_mgc_p3$study_id,   "MGC",    "Phase 3 only", "forest_mgc_phase3.pdf")
-
-# Excluding crossover trials
-plot_subgroup_forest(m_mgadl_nx, d_mgadl_nx$study_id, "MG-ADL", "excluding crossover", "forest_mgadl_nocrossover.pdf")
-plot_subgroup_forest(m_qmg_nx,   d_qmg_nx$study_id,   "QMG",    "excluding crossover", "forest_qmg_nocrossover.pdf")
-plot_subgroup_forest(m_mgc_nx,   d_mgc_nx$study_id,   "MGC",    "excluding crossover", "forest_mgc_nocrossover.pdf")
+sensitivity_results <- bind_rows(
+  results_table(m_mgadl_p3, "MG-ADL", "Phase 3 only"),
+  results_table(m_qmg_p3,   "QMG",    "Phase 3 only"),
+  results_table(m_mgc_p3,   "MGC",    "Phase 3 only"),
+  results_table(m_mgadl_nx, "MG-ADL", "Parallel only"),
+  results_table(m_qmg_nx,   "QMG",    "Parallel only"),
+  results_table(m_mgc_nx,   "MGC",    "Parallel only")
+)
+print(sensitivity_results, row.names = FALSE)
+write.csv(sensitivity_results, "results_sensitivity_summary.csv", row.names = FALSE)
 ```
 
 ## Leave-one-out sensitivity
@@ -250,14 +453,11 @@ loo_mgc   <- leave1out(m_mgc,   method = "REML")
 
 plot_loo <- function(loo_obj, data, label, overall_model, filename, width = 9, height = 9) {
   pdf(filename, width = width, height = height)
-  forest(x       = loo_obj$estimate,
-         ci.lb   = loo_obj$ci.lb,
-         ci.ub   = loo_obj$ci.ub,
-         slab    = data$study_id,
-         xlab    = paste0("Pooled ", label, " change (leave-one-out)"),
-         main    = paste0("Leave-one-out sensitivity \u2212 ", label),
-         refline = as.numeric(overall_model$b),
-         col     = "steelblue", shade = "zebra")
+  forest(x = loo_obj$estimate, ci.lb = loo_obj$ci.lb, ci.ub = loo_obj$ci.ub,
+         slab = data$study_id,
+         xlab = paste0("Pooled ", label, " change (leave-one-out)"),
+         main = paste0("Leave-one-out sensitivity \u2212 ", label),
+         refline = as.numeric(overall_model$b), col = "steelblue", shade = "zebra")
   dev.off()
 }
 
@@ -268,117 +468,47 @@ plot_loo(loo_mgc,   d_mgc,   "MGC",    m_mgc,   "loo_mgc.pdf",   9, 8)
 
 # Meta-regression: study-level predictors
 
-Pre-specified moderators (univariable):  
-1. Mean age, 
-2. Female %, 
-3. MGFA % class III-V, 
-4. AChR-seropositive %,  
-5. Route (ref = IV), 
-6. Phase (ref = 2),  
-7. Assessment timepoint (weeks),  
-8. Trial era (2017+ vs pre-2017),  
-9. Steroid change (Taper vs Stable),  
-10. Placebo-arm rescue therapy rate (%).
+Pre-specified moderators (univariable): mean age, female %, MGFA % class III-V,
+AChR-seropositive %, route (ref = IV), assessment timepoint (weeks), rescue rate (%).
 
 ```{r}
-# MG-ADL
-mr_mgadl_age    <- run_metareg(filter(d_mgadl, !is.na(age_mean)),
-                               "mgadl_change","mgadl_vi", ~age_mean,         "MG-ADL","Mean age")
-mr_mgadl_sex    <- run_metareg(filter(d_mgadl, !is.na(female_pct)),
-                               "mgadl_change","mgadl_vi", ~female_pct,       "MG-ADL","Female%")
-mr_mgadl_mgfa   <- run_metareg(filter(d_mgadl, !is.na(mgfa_severe_pct)),
-                               "mgadl_change","mgadl_vi", ~mgfa_severe_pct,  "MG-ADL","MGFA %III-V")
-mr_mgadl_achr   <- run_metareg(filter(d_mgadl, !is.na(achr_pct)),
-                               "mgadl_change","mgadl_vi", ~achr_pct,         "MG-ADL","AChR%")
-mr_mgadl_route  <- run_metareg(d_mgadl,
-                               "mgadl_change","mgadl_vi", ~route,            "MG-ADL","Route (ref=IV)")
-mr_mgadl_phase  <- run_metareg(d_mgadl,
-                               "mgadl_change","mgadl_vi", ~phase,            "MG-ADL","Phase (ref=2)")
-mr_mgadl_tp     <- run_metareg(filter(d_mgadl, !is.na(tp_mgadl_wk)),
-                               "mgadl_change","mgadl_vi", ~tp_mgadl_wk,      "MG-ADL","Timepoint (wk)")
-mr_mgadl_era17  <- run_metareg(d_mgadl,
-                               "mgadl_change","mgadl_vi", ~era_2017,         "MG-ADL","Era 2017+ vs pre")
-mr_mgadl_taper  <- run_metareg(d_mgadl,
-                               "mgadl_change","mgadl_vi", ~steroid_change,   "MG-ADL","Steroid (Taper vs Stable)")
-mr_mgadl_rescue <- run_metareg(filter(d_mgadl, !is.na(rescue_rate_num)),
-                               "mgadl_change","mgadl_vi", ~rescue_rate_num,  "MG-ADL","Rescue rate (%)")
+mr_mgadl_age    <- run_metareg(filter(d_mgadl, !is.na(age_mean)),         "mgadl_change","mgadl_vi", ~age_mean,        "MG-ADL","Mean age")
+mr_mgadl_sex    <- run_metareg(filter(d_mgadl, !is.na(female_pct)),       "mgadl_change","mgadl_vi", ~female_pct,      "MG-ADL","Female%")
+mr_mgadl_mgfa   <- run_metareg(filter(d_mgadl, !is.na(mgfa_severe_pct)),  "mgadl_change","mgadl_vi", ~mgfa_severe_pct, "MG-ADL","MGFA %III-V")
+mr_mgadl_achr   <- run_metareg(filter(d_mgadl, !is.na(achr_pct)),         "mgadl_change","mgadl_vi", ~achr_pct,        "MG-ADL","AChR%")
+mr_mgadl_route  <- run_metareg(d_mgadl,                                   "mgadl_change","mgadl_vi", ~route,           "MG-ADL","Route (ref=IV)")
+mr_mgadl_tp     <- run_metareg(filter(d_mgadl, !is.na(tp_mgadl_wk)),      "mgadl_change","mgadl_vi", ~tp_mgadl_wk,     "MG-ADL","Timepoint (wk)")
+mr_mgadl_rescue <- run_metareg(filter(d_mgadl, !is.na(rescue_rate_num)),  "mgadl_change","mgadl_vi", ~rescue_rate_num, "MG-ADL","Rescue rate (%)")
 
-# QMG
-mr_qmg_age    <- run_metareg(filter(d_qmg, !is.na(age_mean)),
-                             "qmg_change","qmg_vi", ~age_mean,         "QMG","Mean age")
-mr_qmg_sex    <- run_metareg(filter(d_qmg, !is.na(female_pct)),
-                             "qmg_change","qmg_vi", ~female_pct,       "QMG","Female%")
-mr_qmg_mgfa   <- run_metareg(filter(d_qmg, !is.na(mgfa_severe_pct)),
-                             "qmg_change","qmg_vi", ~mgfa_severe_pct,  "QMG","MGFA %III-V")
-mr_qmg_achr   <- run_metareg(filter(d_qmg, !is.na(achr_pct)),
-                             "qmg_change","qmg_vi", ~achr_pct,         "QMG","AChR%")
-mr_qmg_route  <- run_metareg(d_qmg,
-                             "qmg_change","qmg_vi", ~route,            "QMG","Route (ref=IV)")
-mr_qmg_phase  <- run_metareg(d_qmg,
-                             "qmg_change","qmg_vi", ~phase,            "QMG","Phase (ref=2)")
-mr_qmg_tp     <- run_metareg(filter(d_qmg, !is.na(tp_qmg_wk)),
-                             "qmg_change","qmg_vi", ~tp_qmg_wk,        "QMG","Timepoint (wk)")
-mr_qmg_era17  <- run_metareg(d_qmg,
-                             "qmg_change","qmg_vi", ~era_2017,         "QMG","Era 2017+ vs pre")
-mr_qmg_taper  <- run_metareg(d_qmg,
-                             "qmg_change","qmg_vi", ~steroid_change,   "QMG","Steroid (Taper vs Stable)")
-mr_qmg_rescue <- run_metareg(filter(d_qmg, !is.na(rescue_rate_num)),
-                             "qmg_change","qmg_vi", ~rescue_rate_num,  "QMG","Rescue rate (%)")
+mr_qmg_age    <- run_metareg(filter(d_qmg, !is.na(age_mean)),         "qmg_change","qmg_vi", ~age_mean,        "QMG","Mean age")
+mr_qmg_sex    <- run_metareg(filter(d_qmg, !is.na(female_pct)),       "qmg_change","qmg_vi", ~female_pct,      "QMG","Female%")
+mr_qmg_mgfa   <- run_metareg(filter(d_qmg, !is.na(mgfa_severe_pct)),  "qmg_change","qmg_vi", ~mgfa_severe_pct, "QMG","MGFA %III-V")
+mr_qmg_achr   <- run_metareg(filter(d_qmg, !is.na(achr_pct)),         "qmg_change","qmg_vi", ~achr_pct,        "QMG","AChR%")
+mr_qmg_route  <- run_metareg(d_qmg,                                   "qmg_change","qmg_vi", ~route,           "QMG","Route (ref=IV)")
+mr_qmg_tp     <- run_metareg(filter(d_qmg, !is.na(tp_qmg_wk)),        "qmg_change","qmg_vi", ~tp_qmg_wk,       "QMG","Timepoint (wk)")
+mr_qmg_rescue <- run_metareg(filter(d_qmg, !is.na(rescue_rate_num)),  "qmg_change","qmg_vi", ~rescue_rate_num, "QMG","Rescue rate (%)")
 
-# MGC
-mr_mgc_age    <- run_metareg(filter(d_mgc, !is.na(age_mean)),
-                             "mgc_change","mgc_vi", ~age_mean,         "MGC","Mean age")
-mr_mgc_sex    <- run_metareg(filter(d_mgc, !is.na(female_pct)),
-                             "mgc_change","mgc_vi", ~female_pct,       "MGC","Female%")
-mr_mgc_mgfa   <- run_metareg(filter(d_mgc, !is.na(mgfa_severe_pct)),
-                             "mgc_change","mgc_vi", ~mgfa_severe_pct,  "MGC","MGFA %III-V")
-mr_mgc_achr   <- run_metareg(filter(d_mgc, !is.na(achr_pct)),
-                             "mgc_change","mgc_vi", ~achr_pct,         "MGC","AChR%")
-mr_mgc_route  <- run_metareg(d_mgc,
-                             "mgc_change","mgc_vi", ~route,            "MGC","Route (ref=IV)")
-mr_mgc_phase  <- run_metareg(d_mgc,
-                             "mgc_change","mgc_vi", ~phase,            "MGC","Phase (ref=2)")
-mr_mgc_tp     <- run_metareg(filter(d_mgc, !is.na(tp_mgc_wk)),
-                             "mgc_change","mgc_vi", ~tp_mgc_wk,        "MGC","Timepoint (wk)")
-mr_mgc_era17  <- run_metareg(d_mgc,
-                             "mgc_change","mgc_vi", ~era_2017,         "MGC","Era 2017+ vs pre")
-mr_mgc_taper  <- run_metareg(d_mgc,
-                             "mgc_change","mgc_vi", ~steroid_change,   "MGC","Steroid (Taper vs Stable)")
-mr_mgc_rescue <- run_metareg(filter(d_mgc, !is.na(rescue_rate_num)),
-                             "mgc_change","mgc_vi", ~rescue_rate_num,  "MGC","Rescue rate (%)")
+mr_mgc_age    <- run_metareg(filter(d_mgc, !is.na(age_mean)),         "mgc_change","mgc_vi", ~age_mean,        "MGC","Mean age")
+mr_mgc_sex    <- run_metareg(filter(d_mgc, !is.na(female_pct)),       "mgc_change","mgc_vi", ~female_pct,      "MGC","Female%")
+mr_mgc_mgfa   <- run_metareg(filter(d_mgc, !is.na(mgfa_severe_pct)),  "mgc_change","mgc_vi", ~mgfa_severe_pct, "MGC","MGFA %III-V")
+mr_mgc_achr   <- run_metareg(filter(d_mgc, !is.na(achr_pct)),         "mgc_change","mgc_vi", ~achr_pct,        "MGC","AChR%")
+mr_mgc_route  <- run_metareg(d_mgc,                                   "mgc_change","mgc_vi", ~route,           "MGC","Route (ref=IV)")
+mr_mgc_tp     <- run_metareg(filter(d_mgc, !is.na(tp_mgc_wk)),        "mgc_change","mgc_vi", ~tp_mgc_wk,       "MGC","Timepoint (wk)")
+mr_mgc_rescue <- run_metareg(filter(d_mgc, !is.na(rescue_rate_num)),  "mgc_change","mgc_vi", ~rescue_rate_num, "MGC","Rescue rate (%)")
 ```
 
 # MCID probabilities
 
-P(future trial mean change >= MCID) from the predictive distribution: t_{k-2} centered at mu, scale = sqrt(tau^2 + SE_mu^2).  
-MCID thresholds: MG-ADL >= 2; QMG >= 2 or >=3; MGC >= 3.
-
 ```{r}
 mcid_prob <- function(model, mcid, outcome_label, subgroup_label) {
-  mu         <- as.numeric(model$beta)
-  tau2       <- model$tau2
-  se_mu      <- model$se
-  k          <- model$k
-  pred_scale <- sqrt(tau2 + se_mu^2)
-  df_pred    <- max(k - 2L, 1L)
-
-  # P(future trial mean <= -MCID) = P(improvement >= MCID)
+  mu <- as.numeric(model$beta); tau2 <- model$tau2; se_mu <- model$se; k <- model$k
+  pred_scale <- sqrt(tau2 + se_mu^2); df_pred <- max(k - 2L, 1L)
   p_pred <- pt((-mcid - mu) / pred_scale, df = df_pred)
-  # P(pooled mean <= -MCID)
   p_mean <- pt((-mcid - mu) / se_mu, df = k - 1L)
-
-  tibble(
-    Outcome        = outcome_label,
-    Subgroup       = subgroup_label,
-    MCID           = mcid,
-    k              = k,
-    mu             = round(mu,    3),
-    tau2           = round(tau2,  4),
-    SE_pooled      = round(se_mu, 3),
-    Pred_scale     = round(pred_scale, 3),
-    P_future_trial = round(p_pred * 100, 1),
-    P_pooled_mean  = round(p_mean * 100, 1)
-  )
+  tibble(Outcome = outcome_label, Subgroup = subgroup_label, MCID = mcid, k = k,
+         mu = round(mu, 3), tau2 = round(tau2, 4), SE_pooled = round(se_mu, 3),
+         Pred_scale = round(pred_scale, 3),
+         P_future_trial = round(p_pred * 100, 1), P_pooled_mean = round(p_mean * 100, 1))
 }
 
 results_mcid <- bind_rows(
@@ -397,7 +527,6 @@ results_mcid <- bind_rows(
 print(results_mcid, row.names = FALSE)
 write.csv(results_mcid, "results_mcid.csv", row.names = FALSE)
 
-# Contemporary-only MCID (for Table 4B)
 results_mcid_modern <- bind_rows(
   mcid_prob(m_mgadl_modern, 2, "MG-ADL", "2017+ contemporary"),
   mcid_prob(m_qmg_modern,   2, "QMG",    "2017+ contemporary (MCID=2)"),
@@ -449,7 +578,6 @@ write.csv(within_sd, "results_within_trial_sd.csv", row.names = FALSE)
 # Summary tables
 
 ```{r}
-# Primary results
 res_tbl <- bind_rows(
   results_table(m_mgadl, "MG-ADL"),
   results_table(m_qmg,   "QMG"),
@@ -457,61 +585,28 @@ res_tbl <- bind_rows(
 )
 write.csv(res_tbl, "results_primary_summary.csv", row.names = FALSE)
 
-# Subgroup table (15 rows: 5 subgroups x 3 outcomes)
-subgroup_tbl <- bind_rows(
-  results_table(m_mgadl,        "MG-ADL", "Primary (all trials)"),
-  results_table(m_qmg,          "QMG",    "Primary (all trials)"),
-  results_table(m_mgc,          "MGC",    "Primary (all trials)"),
-  results_table(m_mgadl_modern, "MG-ADL", "Contemporary (2017+)"),
-  results_table(m_qmg_modern,   "QMG",    "Contemporary (2017+)"),
-  results_table(m_mgc_modern,   "MGC",    "Contemporary (2017+)"),
-  results_table(m_mgadl_stable, "MG-ADL", "Stable steroids only"),
-  results_table(m_qmg_stable,   "QMG",    "Stable steroids only"),
-  results_table(m_mgc_stable,   "MGC",    "Stable steroids only"),
-  results_table(m_mgadl_p3,     "MG-ADL", "Phase 3 only"),
-  results_table(m_qmg_p3,       "QMG",    "Phase 3 only"),
-  results_table(m_mgc_p3,       "MGC",    "Phase 3 only"),
-  results_table(m_mgadl_nx,     "MG-ADL", "Excluding crossover"),
-  results_table(m_qmg_nx,       "QMG",    "Excluding crossover"),
-  results_table(m_mgc_nx,       "MGC",    "Excluding crossover")
-)
-write.csv(subgroup_tbl, "results_subgroup_summary.csv", row.names = FALSE)
-
-# Meta-regression table (Table 3 source)
 mr_summary <- bind_rows(
-  # MG-ADL
-  extract_mr(mr_mgadl_age,    "Mean age",                       "MG-ADL", sum(!is.na(d_mgadl$age_mean))),
-  extract_mr(mr_mgadl_sex,    "Female%",                        "MG-ADL", sum(!is.na(d_mgadl$female_pct))),
-  extract_mr(mr_mgadl_mgfa,   "MGFA %III-V",                    "MG-ADL", sum(!is.na(d_mgadl$mgfa_severe_pct))),
-  extract_mr(mr_mgadl_achr,   "AChR%",                          "MG-ADL", sum(!is.na(d_mgadl$achr_pct))),
-  extract_mr(mr_mgadl_route,  "Route (ref=IV)",                 "MG-ADL", nrow(d_mgadl)),
-  extract_mr(mr_mgadl_phase,  "Phase (ref=2)",                  "MG-ADL", nrow(d_mgadl)),
-  extract_mr(mr_mgadl_tp,     "Timepoint (wk)",                 "MG-ADL", sum(!is.na(d_mgadl$tp_mgadl_wk))),
-  extract_mr(mr_mgadl_era17,  "Era (2017+ vs pre-2017)",        "MG-ADL", nrow(d_mgadl)),
-  extract_mr(mr_mgadl_taper,  "Steroid (Taper vs Stable)",      "MG-ADL", nrow(d_mgadl)),
-  extract_mr(mr_mgadl_rescue, "Rescue rate (%)",                "MG-ADL", sum(!is.na(d_mgadl$rescue_rate_num))),
-  # QMG
-  extract_mr(mr_qmg_age,    "Mean age",                  "QMG", sum(!is.na(d_qmg$age_mean))),
-  extract_mr(mr_qmg_sex,    "Female%",                   "QMG", sum(!is.na(d_qmg$female_pct))),
-  extract_mr(mr_qmg_mgfa,   "MGFA %III-V",               "QMG", sum(!is.na(d_qmg$mgfa_severe_pct))),
-  extract_mr(mr_qmg_achr,   "AChR%",                     "QMG", sum(!is.na(d_qmg$achr_pct))),
-  extract_mr(mr_qmg_route,  "Route (ref=IV)",            "QMG", nrow(d_qmg)),
-  extract_mr(mr_qmg_phase,  "Phase (ref=2)",             "QMG", nrow(d_qmg)),
-  extract_mr(mr_qmg_tp,     "Timepoint (wk)",            "QMG", sum(!is.na(d_qmg$tp_qmg_wk))),
-  extract_mr(mr_qmg_era17,  "Era (2017+ vs pre-2017)",   "QMG", nrow(d_qmg)),
-  extract_mr(mr_qmg_taper,  "Steroid (Taper vs Stable)", "QMG", nrow(d_qmg)),
-  extract_mr(mr_qmg_rescue, "Rescue rate (%)",           "QMG", sum(!is.na(d_qmg$rescue_rate_num))),
-  # MGC
-  extract_mr(mr_mgc_age,    "Mean age",                  "MGC", sum(!is.na(d_mgc$age_mean))),
-  extract_mr(mr_mgc_sex,    "Female%",                   "MGC", sum(!is.na(d_mgc$female_pct))),
-  extract_mr(mr_mgc_mgfa,   "MGFA %III-V",               "MGC", sum(!is.na(d_mgc$mgfa_severe_pct))),
-  extract_mr(mr_mgc_achr,   "AChR%",                     "MGC", sum(!is.na(d_mgc$achr_pct))),
-  extract_mr(mr_mgc_route,  "Route (ref=IV)",            "MGC", nrow(d_mgc)),
-  extract_mr(mr_mgc_phase,  "Phase (ref=2)",             "MGC", nrow(d_mgc)),
-  extract_mr(mr_mgc_tp,     "Timepoint (wk)",            "MGC", sum(!is.na(d_mgc$tp_mgc_wk))),
-  extract_mr(mr_mgc_era17,  "Era (2017+ vs pre-2017)",   "MGC", nrow(d_mgc)),
-  extract_mr(mr_mgc_taper,  "Steroid (Taper vs Stable)", "MGC", nrow(d_mgc)),
-  extract_mr(mr_mgc_rescue, "Rescue rate (%)",           "MGC", sum(!is.na(d_mgc$rescue_rate_num)))
+  extract_mr(mr_mgadl_age,    "Mean age",        "MG-ADL", sum(!is.na(d_mgadl$age_mean))),
+  extract_mr(mr_mgadl_sex,    "Female%",         "MG-ADL", sum(!is.na(d_mgadl$female_pct))),
+  extract_mr(mr_mgadl_mgfa,   "MGFA %III-V",     "MG-ADL", sum(!is.na(d_mgadl$mgfa_severe_pct))),
+  extract_mr(mr_mgadl_achr,   "AChR%",           "MG-ADL", sum(!is.na(d_mgadl$achr_pct))),
+  extract_mr(mr_mgadl_route,  "Route (ref=IV)",  "MG-ADL", nrow(d_mgadl)),
+  extract_mr(mr_mgadl_tp,     "Timepoint (wk)",  "MG-ADL", sum(!is.na(d_mgadl$tp_mgadl_wk))),
+  extract_mr(mr_mgadl_rescue, "Rescue rate (%)", "MG-ADL", sum(!is.na(d_mgadl$rescue_rate_num))),
+  extract_mr(mr_qmg_age,    "Mean age",        "QMG", sum(!is.na(d_qmg$age_mean))),
+  extract_mr(mr_qmg_sex,    "Female%",         "QMG", sum(!is.na(d_qmg$female_pct))),
+  extract_mr(mr_qmg_mgfa,   "MGFA %III-V",     "QMG", sum(!is.na(d_qmg$mgfa_severe_pct))),
+  extract_mr(mr_qmg_achr,   "AChR%",           "QMG", sum(!is.na(d_qmg$achr_pct))),
+  extract_mr(mr_qmg_route,  "Route (ref=IV)",  "QMG", nrow(d_qmg)),
+  extract_mr(mr_qmg_tp,     "Timepoint (wk)",  "QMG", sum(!is.na(d_qmg$tp_qmg_wk))),
+  extract_mr(mr_qmg_rescue, "Rescue rate (%)", "QMG", sum(!is.na(d_qmg$rescue_rate_num))),
+  extract_mr(mr_mgc_age,    "Mean age",        "MGC", sum(!is.na(d_mgc$age_mean))),
+  extract_mr(mr_mgc_sex,    "Female%",         "MGC", sum(!is.na(d_mgc$female_pct))),
+  extract_mr(mr_mgc_mgfa,   "MGFA %III-V",     "MGC", sum(!is.na(d_mgc$mgfa_severe_pct))),
+  extract_mr(mr_mgc_achr,   "AChR%",           "MGC", sum(!is.na(d_mgc$achr_pct))),
+  extract_mr(mr_mgc_route,  "Route (ref=IV)",  "MGC", nrow(d_mgc)),
+  extract_mr(mr_mgc_tp,     "Timepoint (wk)",  "MGC", sum(!is.na(d_mgc$tp_mgc_wk))),
+  extract_mr(mr_mgc_rescue, "Rescue rate (%)", "MGC", sum(!is.na(d_mgc$rescue_rate_num)))
 )
 write.csv(mr_summary, "results_metaregression.csv", row.names = FALSE)
 ```
